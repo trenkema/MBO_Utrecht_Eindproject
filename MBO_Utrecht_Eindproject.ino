@@ -6,6 +6,8 @@
 #include <SimpleTimer.h>
 #include <HC4067.h>
 #include <Adafruit_NeoPixel.h>
+#include <WiFi.h>
+#include <esp_now.h>
 
 // ---------- NEOPIXEL RING ----------
 #define LEDS_IN_RING 16
@@ -244,6 +246,43 @@ void checkButtons() {
   }
 }
 
+// ---------- ESP-NOW CALLBACKS ----------
+// 👉 MAC adressen van je slaves (AANPASSEN!)
+uint8_t SecondCaseAddress[] = {0x2C, 0xBC, 0xBB, 0x06, 0x27, 0x18};
+uint8_t MazeAddress[] = {};
+
+// 👉 Struct (moet exact hetzelfde zijn op slaves!)
+typedef struct {
+  int command;
+  int value;
+} Message;
+
+Message data;
+
+// 📤 Callback (verzenden status)
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("Send status: ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
+}
+
+// 📥 Callback (ontvangen van slaves)
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  Message incoming;
+  memcpy(&incoming, incomingData, sizeof(incoming));
+
+  Serial.print("Received from: ");
+  for (int i = 0; i < 6; i++) {
+    Serial.print(mac[i], HEX);
+    if (i < 5) Serial.print(":");
+  }
+  Serial.println();
+
+  Serial.print("Command: ");
+  Serial.print(incoming.command);
+  Serial.print(" | Value: ");
+  Serial.println(incoming.value);
+}
+
 // ---------- SETUP ----------
 void setup() {
   Serial.begin(115200);
@@ -271,6 +310,33 @@ void setup() {
   motorTimer.setInterval(2, stepTask);
   nfcTimer.setInterval(2000, nfcTask);
   resetServos();
+
+  // ESP-NOW setup
+  WiFi.mode(WIFI_STA);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed!");
+    return;
+  }
+
+  esp_now_register_send_cb(OnDataSent);
+  esp_now_register_recv_cb(OnDataRecv);
+
+  // 👉 Slave 1 toevoegen
+  esp_now_peer_info_t peer1 = {};
+  memcpy(peer1.peer_addr, SecondCaseAddress, 6);
+  peer1.channel = 0;
+  peer1.encrypt = false;
+  esp_now_add_peer(&peer1);
+
+  // 👉 Slave 2 toevoegen
+  esp_now_peer_info_t peer2 = {};
+  memcpy(peer2.peer_addr, MazeAddress, 6);
+  peer2.channel = 0;
+  peer2.encrypt = false;
+  esp_now_add_peer(&peer2);
+
+  Serial.println("Master ready!");
 }
 
 // ---------- LOOP ----------
@@ -307,4 +373,13 @@ void loop() {
 
     case WAITING: break;
   }
+
+  // ESPNOW
+  data.command = 1;
+  data.value = random(0, 100);
+
+  esp_now_send(SecondCaseAddress, (uint8_t *) &data, sizeof(data));
+  esp_now_send(MazeAddress, (uint8_t *) &data, sizeof(data));
+
+  delay(2000);
 }
