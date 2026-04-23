@@ -9,6 +9,11 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
+void motorState();
+void setupMotor();
+void updateMotor();
+void nfcTask();
+
 // ---------- NEOPIXEL RING ----------
 #define LEDS_IN_RING 16
 #define COUNTDOWN_INTERVAL 3750  // 60s / 16
@@ -37,8 +42,6 @@ void lightsOff() {
 }
 
 // ---------- TIMERS ----------
-SimpleTimer motorTimer;
-SimpleTimer motorActionTimer;
 SimpleTimer nfcTimer;
 SimpleTimer nfcActionTimer;
 
@@ -84,49 +87,6 @@ bool readButton(int ch) {
   return digitalRead(MUX_SIG) == LOW;
 }
 
-// ---------- STEPPER + AS5600 ----------
-#define STEP_PIN 26
-#define DIR_PIN 27
-#define HALL_PIN 33
-
-AS5600 as5600;
-float continuousAngle = 0, lastRaw = 0, zeroRef = 0;
-
-float getContinuousAngle() {
-  float raw = as5600.readAngle() * 360.0 / 4096.0;
-  float delta = raw - lastRaw;
-  if (delta > 180) delta -= 360;
-  if (delta < -180) delta += 360;
-  continuousAngle += delta;
-  lastRaw = raw;
-  return continuousAngle;
-}
-
-float getRelativeAngle() {
-  return getContinuousAngle() - zeroRef;
-}
-
-float shortestError(float target, float current) {
-  float error = target - current;
-  while (error > 180) error -= 360;
-  while (error < -180) error += 360;
-  return error;
-}
-
-#define ANGLE_TOL 3
-float targets[] = { 127, 247, 7 };
-int targetIndex = 0;
-float targetAngle = 60;
-bool holding = false;
-
-enum State { HOMING,
-             WAITING,
-             OFFSET_MOVE,
-             RUN };
-State state = HOMING;
-
-bool isHomed = false;
-
 void countdownStep() {
   if (countdownLED <= 0) {
     ring.clear();
@@ -151,61 +111,25 @@ void startCountdown() {
   countdownTimerID = nfcActionTimer.setInterval(COUNTDOWN_INTERVAL, countdownStep);
 }
 
-// ---------- STEPPER TASK ----------
-void stepTask() {
-  if (state == HOMING) {
-    if (!digitalRead(HALL_PIN)) return;
-    digitalWrite(DIR_PIN, HIGH);
-  } else if (state == OFFSET_MOVE || state == RUN) {
-    float current = getRelativeAngle();
-    float error = shortestError(targetAngle, current);
-    if (abs(error) < ANGLE_TOL) return;
-    digitalWrite(DIR_PIN, error < 0);
-  } else return;
-
-  digitalWrite(STEP_PIN, HIGH);
-  delayMicroseconds(3);
-  digitalWrite(STEP_PIN, LOW);
-}
-
-// ---------- TIMER CALLBACKS ----------
-void afterHomeWait() {
-  state = OFFSET_MOVE;
-}
-void afterOffsetWait() {
-  // state = RUN;
-  // targetAngle = targets[targetIndex];
-}
-void afterTargetWait() {
-  holding = false;
-  // state = WAITING;
-  // targetIndex = (targetIndex + 1) % 3;
-  // targetAngle = targets[targetIndex];
-
-  if (targetIndex == 0 || targetIndex == 1) // Go to home
-  {
-    targetIndex = 2;
-    targetAngle = targets[2];
-    state = RUN;
-  }
-  else
-  {
-    state = WAITING;
-  }
-}
-
 // ---------- NFC TASK ----------
-void nfcTask() {
-  uint8_t uid[7], uidLength;
-  if (nfc2.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 30) || nfc3.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 30)) {
-    setServoAngle(0, 57);
-    setServoAngle(1, 57);
-    setRGB(255, 0, 255);  // purple
-    ringColor(255, 0, 255);
-    nfcActionTimer.setTimeout(5000, resetServos);
-    nfcActionTimer.setTimeout(1000, lightsOff);
-  }
-}
+// void nfcTask() {
+//   uint8_t uid[7], uidLength;
+//   bool 
+//   if (nfc2.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 30) || nfc3.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 30)) {
+//     // setServoAngle(0, 57);
+//     // setServoAngle(1, 57);
+//     setRGB(255, 0, 255);  // purple
+//     ringColor(255, 0, 255);
+//     // nfcActionTimer.setTimeout(5000, resetServos);
+//     nfcActionTimer.setTimeout(1000, lightsOff);
+//     Serial.print("UID: ");
+//     for (uint8_t i = 0; i < uidLength; i++) {
+//       Serial.print(uid[i], HEX);
+//       Serial.print(" ");
+//     }
+//     Serial.println();
+//   }
+// }
 
 // ---------- BUTTON CHECK ----------
 void checkButtons() {
@@ -225,21 +149,11 @@ void checkButtons() {
         if (i == 1) {  // Button 3 - Bottom Left
           setServoAngle(1, 57);
           nfcActionTimer.setTimeout(2000, resetServos);
-          if (state != RUN && isHomed) {
-            targetIndex = 1;
-            targetAngle = targets[1];
-            state = RUN;
-          }
         }
 
         if (i == 2) {  // BUTTON 2 - Bottom Right
           setServoAngle(0, 57);
           nfcActionTimer.setTimeout(2000, resetServos);
-          if (state != RUN && isHomed) {
-            targetIndex = 0;
-            targetAngle = targets[0];
-            state = RUN;
-          }
         }
       }
     }
@@ -253,11 +167,10 @@ uint8_t MazeAddress[] = {};
 
 // 👉 Struct (moet exact hetzelfde zijn op slaves!)
 typedef struct {
-  int command;
-  int value;
+  char message[32];
 } Message;
 
-Message data;
+Message incomingData;
 
 // 📤 Callback (verzenden status)
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
@@ -266,21 +179,13 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 }
 
 // 📥 Callback (ontvangen van slaves)
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  Message incoming;
-  memcpy(&incoming, incomingData, sizeof(incoming));
+void OnDataRecv(const uint8_t * mac, const uint8_t *data, int len) {
+  memcpy(&incomingData, data, sizeof(incomingData));
 
-  Serial.print("Received from: ");
-  for (int i = 0; i < 6; i++) {
-    Serial.print(mac[i], HEX);
-    if (i < 5) Serial.print(":");
-  }
-  Serial.println();
+  Serial.print("Message: ");
+  Serial.print(incomingData.message);
 
-  Serial.print("Command: ");
-  Serial.print(incoming.command);
-  Serial.print(" | Value: ");
-  Serial.println(incoming.value);
+  processMessages(mac, data, len);
 }
 
 // ---------- SETUP ----------
@@ -289,9 +194,6 @@ void setup() {
   Wire.begin(21, 22);
   SPI.begin(PN532_SCK, PN532_MISO, PN532_MOSI);
 
-  pinMode(STEP_PIN, OUTPUT);
-  pinMode(DIR_PIN, OUTPUT);
-  pinMode(HALL_PIN, INPUT_PULLUP);
   pinMode(MUX_SIG, INPUT_PULLUP);
 
   pca.begin();
@@ -305,10 +207,7 @@ void setup() {
   nfc2.SAMConfig();
   nfc3.SAMConfig();
 
-  lastRaw = as5600.readAngle() * 360.0 / 4096.0;
-
-  motorTimer.setInterval(2, stepTask);
-  nfcTimer.setInterval(2000, nfcTask);
+  setupMotor();
   resetServos();
 
   // ESP-NOW setup
@@ -337,49 +236,13 @@ void setup() {
   esp_now_add_peer(&peer2);
 
   Serial.println("Master ready!");
+  nfcTimer.setInterval(500, nfcTask);
 }
 
 // ---------- LOOP ----------
 void loop() {
-  motorTimer.run();
-  motorActionTimer.run();
+  updateMotor();
   nfcTimer.run();
   nfcActionTimer.run();
   checkButtons();
-
-  switch (state) {
-    case HOMING:
-      if (!digitalRead(HALL_PIN)) {
-        zeroRef = getContinuousAngle();
-        state = WAITING;
-        motorTimer.setTimeout(1000, afterHomeWait);
-      }
-      break;
-
-    case OFFSET_MOVE:
-      if (abs(shortestError(7, getRelativeAngle())) < ANGLE_TOL) {
-        motorTimer.setTimeout(3000, afterOffsetWait);
-        isHomed = true;
-        state = WAITING;
-      }
-      break;
-
-    case RUN:
-      if (!holding && abs(shortestError(targetAngle, getRelativeAngle())) < ANGLE_TOL) {
-        holding = true;
-        motorTimer.setTimeout(5000, afterTargetWait);
-      }
-      break;
-
-    case WAITING: break;
-  }
-
-  // ESPNOW
-  data.command = 1;
-  data.value = random(0, 100);
-
-  esp_now_send(SecondCaseAddress, (uint8_t *) &data, sizeof(data));
-  esp_now_send(MazeAddress, (uint8_t *) &data, sizeof(data));
-
-  delay(2000);
 }
