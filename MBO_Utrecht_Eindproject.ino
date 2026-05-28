@@ -9,6 +9,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
+void updateTimerRing();
 void motorState();
 void setupMotor();
 void updateMotor();
@@ -143,17 +144,19 @@ void checkButtons() {
         Serial.println(" pressed");
 
         if (i == 0) {  // Button 1 - Top
-          startCountdown();
+          // startCountdown();
           setRGB(0, 0, 255);
         }
-        if (i == 1) {  // Button 3 - Bottom Left
-          setServoAngle(1, 57);
-          nfcActionTimer.setTimeout(2000, resetServos);
+        if (i == 1) {  // Button 3 - Bottom Left // Start Easy
+          startGame(0);
+          // setServoAngle(1, 57);
+          // nfcActionTimer.setTimeout(2000, resetServos);
         }
 
-        if (i == 2) {  // BUTTON 2 - Bottom Right
-          setServoAngle(0, 57);
-          nfcActionTimer.setTimeout(2000, resetServos);
+        if (i == 2) {  // BUTTON 2 - Bottom Right // Start Hard
+          startGame(1);
+          // setServoAngle(0, 57);
+          // nfcActionTimer.setTimeout(2000, resetServos);
         }
       }
     }
@@ -163,7 +166,7 @@ void checkButtons() {
 // ---------- ESP-NOW CALLBACKS ----------
 // 👉 MAC adressen van je slaves (AANPASSEN!)
 uint8_t SecondCaseAddress[] = {0x2C, 0xBC, 0xBB, 0x06, 0x27, 0x18};
-uint8_t MazeAddress[] = {};
+uint8_t MazeAddress[] = {0xB0, 0xCB, 0xD8, 0xCD, 0xE8, 0x40};
 
 // 👉 Struct (moet exact hetzelfde zijn op slaves!)
 typedef struct {
@@ -241,6 +244,7 @@ void setup() {
 
 // ---------- LOOP ----------
 void loop() {
+  updateTimerRing();
   updateMotor();
   nfcTimer.run();
   nfcActionTimer.run();

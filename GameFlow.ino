@@ -3,17 +3,29 @@ bool fusePuzzleUnlocked   = true;
 bool symbolPuzzleUnlocked = true;
 bool mazePuzzleUnlocked   = false;
 
-// ================= PUZZLE STATES =================
+// ================= GAME STATES =================
+bool gameStarted = false;
 bool easyMode = true;
 
 // ================= VARIABLES =================
 extern SimpleTimer motorActionTimer;
 
 // ================= TIMER =================
-// bool timerActive = false;
-// unsigned long gameTimerStart = 0;
-// const unsigned long TIMER_DURATION = 100000;
-// unsigned long lastTimerUpdate = 0;
+// ================= TIMER =================
+bool timerActive = false;
+unsigned long gameTimerStart = 0;
+const unsigned long TIMER_DURATION = 100000;
+unsigned long lastTimerUpdate = 0;
+
+void startGame(int mode) {
+  strcpy(incomingData.message, "Game_Started");
+  esp_now_send(SecondCaseAddress, (uint8_t *) &incomingData, sizeof(incomingData));
+  gameStarted = true;
+  easyMode = (mode == 0);
+  timerActive = true;
+  gameTimerStart = millis();
+  Serial.println(easyMode ? "Easy Mode Started!" : "Hard Mode Started!");
+}
 
 void fusePuzzleSolved() {
   strcpy(incomingData.message, "Fuse_Puzzle_Solved");
