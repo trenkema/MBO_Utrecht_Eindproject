@@ -35,6 +35,7 @@ float offsetAngle = 5;
 bool holding = false;
 bool inPosition = false;
 bool forcedMove = false;
+bool isHomed = false;
 
 // =========================
 // STATES
@@ -212,9 +213,9 @@ void afterOffsetWait() { // Showing correct screen for symbol puzzle
   state = RUN;
 
   if (easyMode) {
-    targetAngle = targets[1]; // Easy Screen
+    targetAngle = targets[0]; // Easy Screen
   } else {
-    targetAngle = targets[0]; // Hard Screen
+    targetAngle = targets[1]; // Hard Screen
   }
 //   targetAngle = targets[targetIndex];
   inPosition = false;
@@ -254,7 +255,8 @@ void motorState() {
             lastRaw = raw;
             continuousAngle = 0;
             zeroRef = 0;
-
+            isHomed = true;
+            
             Serial.println("Homed!");
 
             state = WAITING;

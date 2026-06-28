@@ -15,6 +15,13 @@ void setupMotor();
 void updateMotor();
 void nfcTask();
 
+// ---------- READY UP SYSTEM ----------
+bool readyUpActive = false;
+int selectedMode = 0;
+unsigned long readyUpStartTime = 0;
+const unsigned long READY_UP_TIMEOUT = 30000;
+volatile bool pendingGameStart = false;
+
 // ---------- NEOPIXEL RING ----------
 #define LEDS_IN_RING 16
 #define COUNTDOWN_INTERVAL 3750  // 60s / 16
@@ -25,6 +32,7 @@ int countdownTimerID = -1;
 #define PIXEL_PIN 32
 #define NUMPIXELS 16
 Adafruit_NeoPixel ring(NUMPIXELS, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel talk_led(1, 25, NEO_GRB + NEO_KHZ800);
 
 void ringColor(uint8_t r, uint8_t g, uint8_t b) {
   for (int i = 0; i < NUMPIXELS; i++)
@@ -45,11 +53,27 @@ void lightsOff() {
 // ---------- TIMERS ----------
 SimpleTimer nfcTimer;
 SimpleTimer nfcActionTimer;
+SimpleTimer randomActionTimer;
 
 // ---------- PCA SERVO ----------
 Adafruit_PWMServoDriver pca(0x40);
 #define SERVO_MIN 150
 #define SERVO_MAX 600
+
+bool isOtherTalking = false;
+bool isTalking = false;
+
+// ---------- ESP-NOW CALLBACKS ----------
+// 👉 MAC adressen van je slaves (AANPASSEN!)
+uint8_t SecondCaseAddress[] = {0x2C, 0xBC, 0xBB, 0x06, 0x27, 0x18};
+uint8_t MazeAddress[] = {0xB0, 0xCB, 0xD8, 0xCD, 0xE8, 0x40};
+
+// 👉 Struct (moet exact hetzelfde zijn op slaves!)
+typedef struct {
+  char message[32];
+} Message;
+
+Message incomingData;
 
 void setRGB(uint8_t r, uint8_t g, uint8_t b) {
   pca.setPWM(RGB_R, 0, map(r, 0, 255, 0, 4095));
@@ -63,8 +87,14 @@ void setServoAngle(uint8_t ch, int angle) {
 }
 
 void resetServos() {
-  setServoAngle(0, 0);
-  setServoAngle(1, 0);
+  setServoAngle(0, 2);
+  setServoAngle(1, 2);
+}
+
+void wipeServos() {
+  setServoAngle(0, 57);
+  setServoAngle(1, 57);
+  randomActionTimer.setTimeout(2000, resetServos);
 }
 
 // ---------- PN532 ----------
@@ -112,26 +142,6 @@ void startCountdown() {
   countdownTimerID = nfcActionTimer.setInterval(COUNTDOWN_INTERVAL, countdownStep);
 }
 
-// ---------- NFC TASK ----------
-// void nfcTask() {
-//   uint8_t uid[7], uidLength;
-//   bool 
-//   if (nfc2.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 30) || nfc3.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 30)) {
-//     // setServoAngle(0, 57);
-//     // setServoAngle(1, 57);
-//     setRGB(255, 0, 255);  // purple
-//     ringColor(255, 0, 255);
-//     // nfcActionTimer.setTimeout(5000, resetServos);
-//     nfcActionTimer.setTimeout(1000, lightsOff);
-//     Serial.print("UID: ");
-//     for (uint8_t i = 0; i < uidLength; i++) {
-//       Serial.print(uid[i], HEX);
-//       Serial.print(" ");
-//     }
-//     Serial.println();
-//   }
-// }
-
 // ---------- BUTTON CHECK ----------
 void checkButtons() {
   for (int i = 0; i < 3; i++) {
@@ -144,36 +154,34 @@ void checkButtons() {
         Serial.println(" pressed");
 
         if (i == 0) {  // Button 1 - Top
+          talk_led.setPixelColor(0, talk_led.Color(0, 0, 0));
+          talk_led.show();
+          strcpy(incomingData.message, "NOT_TALKING");
+          esp_now_send(SecondCaseAddress, (uint8_t *) &incomingData, sizeof(incomingData));
           // startCountdown();
-          setRGB(0, 0, 255);
         }
         if (i == 1) {  // Button 3 - Bottom Left // Start Easy
-          startGame(0);
+          startReadyUp(0);
           // setServoAngle(1, 57);
           // nfcActionTimer.setTimeout(2000, resetServos);
         }
 
         if (i == 2) {  // BUTTON 2 - Bottom Right // Start Hard
-          startGame(1);
+          startReadyUp(1);
           // setServoAngle(0, 57);
           // nfcActionTimer.setTimeout(2000, resetServos);
         }
       }
+      else if (!pressed && i == 0) {
+        if (isOtherTalking) talk_led.setPixelColor(0, talk_led.Color(0, 255, 0)); // RED
+        else talk_led.setPixelColor(0, talk_led.Color(255, 0, 0)); // GREEN
+        talk_led.show();
+        strcpy(incomingData.message, "TALKING");
+        esp_now_send(SecondCaseAddress, (uint8_t *) &incomingData, sizeof(incomingData));
+      }
     }
   }
 }
-
-// ---------- ESP-NOW CALLBACKS ----------
-// 👉 MAC adressen van je slaves (AANPASSEN!)
-uint8_t SecondCaseAddress[] = {0x2C, 0xBC, 0xBB, 0x06, 0x27, 0x18};
-uint8_t MazeAddress[] = {0xB0, 0xCB, 0xD8, 0xCD, 0xE8, 0x40};
-
-// 👉 Struct (moet exact hetzelfde zijn op slaves!)
-typedef struct {
-  char message[32];
-} Message;
-
-Message incomingData;
 
 // 📤 Callback (verzenden status)
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
@@ -187,6 +195,20 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *data, int len) {
 
   Serial.print("Message: ");
   Serial.print(incomingData.message);
+
+  // TALKING STATUS
+    // TALKING STATUS
+  if (strcmp(incomingData.message, "TALKING") == 0) {
+    isOtherTalking = true;
+    if (!isTalking) talk_led.setPixelColor(0, talk_led.Color(0, 255, 0)); // RED
+    talk_led.show();
+  }
+  else if (strcmp(incomingData.message, "NOT_TALKING") == 0) {
+    isOtherTalking = false;
+    if (isTalking) talk_led.setPixelColor(0, talk_led.Color(255, 0, 0)); // GREEN
+    else talk_led.setPixelColor(0, talk_led.Color(0, 0, 0)); // OFF
+    talk_led.show();
+  }
 
   processMessages(mac, data, len);
 }
@@ -203,7 +225,14 @@ void setup() {
   pca.setPWMFreq(50);
 
   ring.begin();
+  ring.setBrightness(5);
+  ring.clear();
   ring.show();
+
+  talk_led.begin();
+  talk_led.setBrightness(15);
+  talk_led.clear();
+  talk_led.show();
 
   nfc2.begin();
   nfc3.begin();
@@ -211,7 +240,7 @@ void setup() {
   nfc3.SAMConfig();
 
   setupMotor();
-  resetServos();
+  wipeServos();
 
   // ESP-NOW setup
   WiFi.mode(WIFI_STA);
@@ -244,9 +273,20 @@ void setup() {
 
 // ---------- LOOP ----------
 void loop() {
+  if (pendingGameStart)
+  {
+      pendingGameStart = false;
+
+      clearReadyPulse();
+
+      startGame(selectedMode);
+  }
   updateTimerRing();
   updateMotor();
   nfcTimer.run();
   nfcActionTimer.run();
+  randomActionTimer.run();
   checkButtons();
+  updateReadyPulse();
+  updateFlash();
 }

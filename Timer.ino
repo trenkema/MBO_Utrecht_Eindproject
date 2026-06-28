@@ -1,3 +1,12 @@
+bool flashing = false;
+bool flashState = false;
+int flashCount = 0;
+int flashR, flashG, flashB;
+unsigned long lastFlashTime = 0;
+const int FLASH_INTERVAL = 500;
+const int FLASH_TOTAL = 20;
+extern bool gameOver;
+
 // ================= TIMER =================
 void updateTimerRing() {
   if (!timerActive) return;
@@ -6,7 +15,13 @@ void updateTimerRing() {
   lastTimerUpdate = millis();
 
   unsigned long elapsed = millis() - gameTimerStart;
-  if (elapsed >= TIMER_DURATION) return;
+  if (elapsed >= TIMER_DURATION) { // GAME LOST
+    gameLost();
+    return;
+  }
+  else if (gameOver && elapsed < TIMER_DURATION) { // GAME WON
+    return;
+  }
 
   float progress = (float)elapsed / TIMER_DURATION;
   int ledsPassed = (int)(progress * 16.0 + 0.5);
@@ -26,4 +41,60 @@ void updateTimerRing() {
   }
 
   ring.show();
+}
+
+void gameLost() {
+  strcpy(incomingData.message, "Game_Over");
+  esp_now_send(SecondCaseAddress, (uint8_t *) &incomingData, sizeof(incomingData));
+  gameStarted = false;
+  timerActive = false;
+  gameOver = true;
+  startFlash(255, 0, 0);
+  Serial.println("Game Over!");
+}
+
+void gameWon() {
+  gameStarted = false;
+  timerActive = false;
+  gameOver = true;
+  startFlash(0, 255, 0);
+  Serial.println("Game Over!");
+}
+
+void startFlash(int r, int g, int b) {
+  flashing = true;
+  flashState = true;
+  flashCount = 0;
+  flashR = r;
+  flashG = g;
+  flashB = b;
+  lastFlashTime = millis();
+}
+
+void updateFlash() {
+  if (!flashing) return;
+  if (millis() - lastFlashTime < FLASH_INTERVAL) return;
+
+  lastFlashTime = millis();
+
+  int r = flashState ? 0 : flashR;
+  int g = flashState ? 0 : flashG;
+  int b = flashState ? 0 : flashB;
+
+  flashState = !flashState;
+  flashCount++;
+
+  if (flashCount >= FLASH_TOTAL) {
+    if (gameOver) { // RESTART ESP32 TO RESET THE WHOLE UNIT
+      ESP.restart();
+      return;
+    }
+
+    flashing = false;
+
+    for (int i = 0; i < 12; i++) {
+      ring.setPixelColor(i, ring.Color(r,g,b));
+    }
+    ring.show();
+  }
 }

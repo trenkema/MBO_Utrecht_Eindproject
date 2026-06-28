@@ -13,6 +13,10 @@ SlotState slot2 = {false, false, false};
 SlotState lastSlot1 = {false, false, false};
 SlotState lastSlot2 = {false, false, false};
 
+extern unsigned long gameTimerStart;
+extern bool gameStarted;
+extern bool gameOver;
+
 bool compareUID(uint8_t *uid, uint8_t len, uint8_t *target) {
   if (len != 7) return false;
 
@@ -23,7 +27,7 @@ bool compareUID(uint8_t *uid, uint8_t len, uint8_t *target) {
 }
 
 void nfcTask() {
-  if (!fusePuzzleUnlocked) return; // Only run if puzzle not solved yet
+  if (!fusePuzzleUnlocked || !gameStarted || millis() - gameTimerStart < 5000 || gameOver) return; // Only run if puzzle not solved yet
   uint8_t uid[7];
   uint8_t uid2[7];
   uint8_t uidLength;
@@ -35,7 +39,7 @@ void nfcTask() {
 
   // ---- Reader 1 ----
   if (nfc3.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 30)) {
-    Serial.println("Reader 1 detected!");
+    // Serial.println("Reader 1 detected!");
     slot1.present = true;
 
     if (compareUID(uid, uidLength, uidReader1)) {
@@ -48,7 +52,7 @@ void nfcTask() {
 
   // ---- Reader 2 ----
   if (nfc2.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid2, &uidLength2, 30)) {
-    Serial.println("Reader 2 detected!");
+    // Serial.println("Reader 2 detected!");
     slot2.present = true;
 
     if (compareUID(uid2, uidLength2, uidReader2)) {
