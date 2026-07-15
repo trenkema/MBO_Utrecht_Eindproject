@@ -31,6 +31,8 @@ float targets[] = {126, 246, 5};
 int targetIndex = 0;
 float targetAngle = 0;
 float offsetAngle = 5;
+unsigned long homingStartTime = 0;
+bool hallEnabled = false;
 
 bool holding = false;
 bool inPosition = false;
@@ -107,9 +109,13 @@ void stepTask() {
   }
 
   if (state == HOMING) {
+    if (!hallEnabled && millis() - homingStartTime >= 3000) {
+      hallEnabled = true;
+    }
+
     digitalWrite(EN_PIN, LOW);
 
-    if (!digitalRead(HALL_PIN)) {
+    if (hallEnabled && !digitalRead(HALL_PIN)) {
       stepEnabled = false;
       return;
     }
@@ -189,7 +195,7 @@ void stepTask() {
 void IRAM_ATTR onStepTimer() {
   if (!stepEnabled) return;
 
-  if (state == HOMING && digitalRead(HALL_PIN) == LOW) {
+  if (hallEnabled && state == HOMING && digitalRead(HALL_PIN) == LOW) {
     stepEnabled = false;
     return;
   }
@@ -247,7 +253,7 @@ void motorState() {
     switch (state) {
 
         case HOMING:
-        if (digitalRead(HALL_PIN) == LOW) {
+        if (hallEnabled && digitalRead(HALL_PIN) == LOW) {
 
             stepEnabled = false;
 
@@ -277,7 +283,10 @@ void motorState() {
             zeroRef = 0;
 
             stepEnabled = false;
-            state = WAITING;
+            Serial.println("Reached Offset.");
+            targetAngle = targets[2];   // home screen
+            state = RUN;
+            inPosition = false;
             // motorActionTimer.setTimeout(2000, afterOffsetWait);
         }
         break;
@@ -312,6 +321,9 @@ void setupMotor()
     timerAlarmEnable(stepTimer);
 
     Serial.println("Motor Initialized");
+
+    homingStartTime = millis();
+    hallEnabled = false;
 }
 
 void updateMotor() {

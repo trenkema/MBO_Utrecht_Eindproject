@@ -14,7 +14,7 @@ extern SimpleTimer motorActionTimer;
 // ================= TIMER =================
 bool timerActive = false;
 unsigned long gameTimerStart = 0;
-const unsigned long TIMER_DURATION = 100000;
+const unsigned long TIMER_DURATION = 600000;
 unsigned long lastTimerUpdate = 0;
 
 int pulseBrightness = 0;
@@ -59,7 +59,7 @@ void updateReadyPulse()
                 ring.Color(
                     pulseBrightness,
                     0,
-                    0));
+                    pulseBrightness));
         }
 
         ring.show();
@@ -83,7 +83,7 @@ void updateReadyPulse()
                 ring.Color(
                     pulseBrightness,
                     0,
-                    0));
+                    pulseBrightness));
         }
 
         ring.show();
@@ -122,7 +122,11 @@ void startReadyUp(int mode)
 
     readyUpStartTime = millis();
 
-    strcpy(incomingData.message, "Ready_Up");
+    if (selectedMode == 0) {
+        strcpy(incomingData.message, "Ready_Up_Easy");
+    } else {
+        strcpy(incomingData.message, "Ready_Up_Hard");
+    }
 
     esp_now_send(
         SecondCaseAddress,

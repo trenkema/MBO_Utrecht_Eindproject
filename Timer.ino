@@ -71,6 +71,13 @@ void startFlash(int r, int g, int b) {
   lastFlashTime = millis();
 }
 
+void flashTimerRing(int r, int g, int b) {
+  for (int i = 0; i < 16; i++) {
+    ring.setPixelColor(i, ring.Color(r, g, b));
+  }
+  ring.show();
+}
+
 void updateFlash() {
   if (!flashing) return;
   if (millis() - lastFlashTime < FLASH_INTERVAL) return;
@@ -80,6 +87,11 @@ void updateFlash() {
   int r = flashState ? 0 : flashR;
   int g = flashState ? 0 : flashG;
   int b = flashState ? 0 : flashB;
+
+  for (int i = 0; i < 16; i++) {
+    ring.setPixelColor(i, ring.Color(r,g,b));
+  }
+  ring.show();
 
   flashState = !flashState;
   flashCount++;
@@ -91,10 +103,5 @@ void updateFlash() {
     }
 
     flashing = false;
-
-    for (int i = 0; i < 12; i++) {
-      ring.setPixelColor(i, ring.Color(r,g,b));
-    }
-    ring.show();
   }
 }
